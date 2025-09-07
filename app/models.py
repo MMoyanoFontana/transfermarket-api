@@ -63,7 +63,7 @@ db_url = os.getenv("DATABASE_URL")
 if not db_url:
     raise ValueError("DATABASE_URL is not set in the environment variables")
 
-engine = create_engine(db_url, connect_args={"check_same_thread": False})
+engine = create_engine(db_url)
 SQLModel.metadata.create_all(engine)
 
 
