@@ -11,7 +11,7 @@ from sqlmodel import Session, col, select
 from app.models import League, Player, Team, TeamLeagueLink, engine
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(filename="scrapper.log", level=logging.INFO)
+logging.basicConfig(level=logging.INFO)
 
 
 DEFAULT_DELAY_RANGE = (5, 60)
