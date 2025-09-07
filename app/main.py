@@ -2,22 +2,24 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import col, delete, select
 
 from app.models import League, Player, SessionDep, Team, TeamLeagueLink
-from app.scraper import scrape_leagues, scrape_teams, scrape_players_for_existing_teams
+from app.scraper import scrape_leagues, scrape_players_for_existing_teams, scrape_teams
 
 load_dotenv()
-FUBOLXD_URL = os.getenv("fubolxd_url")
+FUBOLXD_URL = os.getenv("FUBOLXD_URL")
+MOYA_IP = os.getenv("MOYA_IP")
 if not FUBOLXD_URL:
     raise ValueError("FUBOLXD_URL is not set in the environment variables")
+if not MOYA_IP:
+    raise ValueError("MOYA_IP is not set in the environment variables")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # scrape_leagues()
     yield
 
 
@@ -26,7 +28,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FUBOLXD_URL],
+    allow_origins=[FUBOLXD_URL, f"http://{MOYA_IP}"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -53,8 +55,7 @@ def read_leagues(session: SessionDep) -> list[League]:
 
 @app.post("/leagues/teams/")
 def update_teams(
-    background_tasks: BackgroundTasks,
-    avoid_leagues: list[int] = Query(default=None)
+    background_tasks: BackgroundTasks, avoid_leagues: list[int] = Query(default=None)
 ) -> str:
     background_tasks.add_task(scrape_teams, avoid_leagues=avoid_leagues)
     return "Team update started"
@@ -87,10 +88,11 @@ def read_all_teams(session: SessionDep) -> dict[str, list[Team]]:
 
 @app.post("/teams/players/")
 def update_players(
-    background_tasks: BackgroundTasks,
-    include_leagues: list[int] = Query(default=None)
+    background_tasks: BackgroundTasks, include_leagues: list[int] = Query(default=None)
 ) -> str:
-    background_tasks.add_task(scrape_players_for_existing_teams, include_leagues=include_leagues)
+    background_tasks.add_task(
+        scrape_players_for_existing_teams, include_leagues=include_leagues
+    )
     return "Player update started"
 
 
@@ -100,3 +102,7 @@ def read_players(session: SessionDep, team_id: str) -> list[Player]:
     print(players)
     return list(players)
 
+
+@app.get("/health")
+def health_check() -> dict:
+    return {"status": "ok"}

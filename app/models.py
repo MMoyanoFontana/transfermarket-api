@@ -1,5 +1,7 @@
+import os
 from typing import Annotated, Literal
 
+from dotenv import load_dotenv
 from fastapi import Depends
 from sqlmodel import Field, Relationship, Session, SQLModel, String, create_engine
 
@@ -56,9 +58,12 @@ class Player(SQLModel, table=True):
         return f"Player(name={self.name!r}, position={self.position!r}, team={self.team!r})"
 
 
-engine = create_engine(
-    "sqlite:///transfermarket.db", connect_args={"check_same_thread": False}
-)
+load_dotenv()
+db_url = os.getenv("DATABASE_URL")
+if not db_url:
+    raise ValueError("DATABASE_URL is not set in the environment variables")
+
+engine = create_engine(db_url, connect_args={"check_same_thread": False})
 SQLModel.metadata.create_all(engine)
 
 

@@ -78,10 +78,12 @@ def scrape_teams(avoid_leagues: list[int] | None = None) -> None:
     with Session(engine) as session:
         if avoid_leagues is None:
             stmt = select(League)
-        else: 
-            stmt = select(League).where(League.id.notin_(avoid_leagues))    
+        else:
+            stmt = select(League).where(League.id.notin_(avoid_leagues))
         logging.info("Starting team load...")
-        logging.info(f"Avoiding leagues: {avoid_leagues}",)
+        logging.info(
+            f"Avoiding leagues: {avoid_leagues}",
+        )
         leagues = session.exec(stmt).all()
         for league in leagues:
             logging.info(f"Loading {league.name} teams:")
@@ -101,7 +103,8 @@ def scrape_teams(avoid_leagues: list[int] | None = None) -> None:
                 if league not in team.leagues:
                     team.leagues.append(league)
         session.commit()
-    return    
+    return
+
 
 def extract_players_from_soup(soup) -> list[Player]:
     players = []
@@ -155,7 +158,7 @@ def scrape_players_for_existing_teams(include_leagues: list[int] | None = None) 
             soup = polite_get_soup(team.link)
             players = extract_players_from_soup(soup)
             for player in players:
-                logging.info(f" Adding/Updating player: {player.name}")    
+                logging.info(f" Adding/Updating player: {player.name}")
                 existing_player = session.exec(
                     select(Player).where(Player.tm_id == player.tm_id)
                 ).first()
@@ -168,9 +171,9 @@ def scrape_players_for_existing_teams(include_leagues: list[int] | None = None) 
                     )
                     player = existing_player
                 player.team_id = team.id
-                player.team = team    
+                player.team = team
                 session.add(player)
-        session.commit()        
+        session.commit()
     return
 
 
@@ -178,7 +181,7 @@ def scrape_leagues() -> None:
     DEFAULT_LEAGUES = {
         # Top 5 Europe
         "Premier League": "https://www.transfermarkt.com/premier-league/startseite/wettbewerb/GB1",
-        "LaLiga": "https://www.transfermarkt.com/laliga/startseite/wettbewerb/ES1", 
+        "LaLiga": "https://www.transfermarkt.com/laliga/startseite/wettbewerb/ES1",
         "Serie A": "https://www.transfermarkt.com/serie-a/startseite/wettbewerb/IT1",
         "Bundesliga": "https://www.transfermarkt.com/bundesliga/startseite/wettbewerb/L1",
         "Ligue 1": "https://www.transfermarkt.com/ligue-1/startseite/wettbewerb/FR1",
