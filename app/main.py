@@ -2,7 +2,7 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import col, delete, select
 
@@ -39,9 +39,9 @@ def read_root() -> dict:
 
 
 @app.post("/leagues/")
-def update_leagues() -> str:
-    scrape_leagues()
-    return "Leagues updated"
+def update_leagues(background_tasks: BackgroundTasks) -> str:
+    background_tasks.add_task(scrape_leagues)
+    return "League update started in background"
 
 
 @app.get("/leagues/")
@@ -52,9 +52,12 @@ def read_leagues(session: SessionDep) -> list[League]:
 
 
 @app.post("/leagues/teams/")
-def update_teams(avoid_leagues: list[int] = Query(default=None)) -> str:
-    scrape_teams(avoid_leagues=avoid_leagues)
-    return "Teams updated"
+def update_teams(
+    background_tasks: BackgroundTasks,
+    avoid_leagues: list[int] = Query(default=None)
+) -> str:
+    background_tasks.add_task(scrape_teams, avoid_leagues=avoid_leagues)
+    return "Team update started"
 
 
 @app.delete("/leagues/{league_id}/")
@@ -83,9 +86,12 @@ def read_all_teams(session: SessionDep) -> dict[str, list[Team]]:
 
 
 @app.post("/teams/players/")
-def update_players(include_leagues: list[int] = Query(default=None)) -> str:
-    scrape_players_for_existing_teams(include_leagues=include_leagues)
-    return "Players updated"
+def update_players(
+    background_tasks: BackgroundTasks,
+    include_leagues: list[int] = Query(default=None)
+) -> str:
+    background_tasks.add_task(scrape_players_for_existing_teams, include_leagues=include_leagues)
+    return "Player update started"
 
 
 @app.get("/teams/{team_id}/players/")
