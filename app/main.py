@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, Query
+from fastapi import BackgroundTasks, HTTPException, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import col, select
 
@@ -62,6 +62,8 @@ def read_league_teams(
         .where(TeamLeagueLink.league_id == league_id)
     )
     teams = session.exec(stmt).all()
+    if not teams:
+        raise HTTPException(status_code=404, detail="League not found")
     return list(teams)
 
 
@@ -100,7 +102,7 @@ def update_teams(
 @subapp.post("/players/")
 def update_players(
     background_tasks: BackgroundTasks,
-    offset: int = 0,  # team offset ie. from which team to start
+    offset: int = 0,  # team offset ie. will start from team = offset + 1
     limit: Annotated[int, Query(le=100)] = 100,  # how many teams to process in this run
 ) -> str:
     background_tasks.add_task(

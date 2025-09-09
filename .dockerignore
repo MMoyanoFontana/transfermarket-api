@@ -1,0 +1,25 @@
+# Ignore virtual environments
+.venv/
+env/
+venv/
+
+# Ignore uv cache and build artifacts
+.uv/
+.ruff_cache/
+
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Ignore editor/IDE specific files
+.vscode/
+.idea/
+
+# Ignore version control artifacts
+.git/
+.gitignore
+
+# Ignore logs and temporary files
+*.log
+tmp/

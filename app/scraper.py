@@ -99,7 +99,7 @@ PRETTIER_NAME = {
 
 def polite_get_soup(url, timeout=30) -> BeautifulSoup:
     sleep_time = random.uniform(*DEFAULT_DELAY_RANGE)
-    logging.info(f"Fetching URL: {url} Delay before request: {sleep_time}")
+    logger.info(f"Fetching URL: {url} Delay before request: {sleep_time}")
     time.sleep(sleep_time)
     headers = HEADERS_BASE.copy()
     headers["User-Agent"] = random.choice(USER_AGENTS)
@@ -150,29 +150,30 @@ def scrape_teams(avoid_leagues: list[int] | None = None) -> None:
             stmt = select(League)
         else:
             stmt = select(League).where(League.id.notin_(avoid_leagues))
-        logging.info("Starting team load...")
-        logging.info(
+        logger.info("Starting team load...")
+        logger.info(
             f"Avoiding leagues: {avoid_leagues}",
         )
         leagues = session.exec(stmt).all()
         for league in leagues:
-            logging.info(f"Loading {league.name} teams:")
+            logger.info(f"Loading {league.name} teams:")
             soup = polite_get_soup(league.link)
             teams = extract_teams_from_soup(soup)
-            logging.info(f" Found {len(teams)} teams.")
+            logger.info(f" Found {len(teams)} teams.")
             for team in teams:
-                logging.info(f"Processing team: {team.name}")
+                logger.info(f"Processing team: {team.name}")
                 # Por si el equipo ya existe, ej equipos de premier league en champions
                 existing_team = session.exec(
                     select(Team).where(Team.tm_id == team.tm_id)
                 ).first()
                 if existing_team:
-                    logging.info(f"Team {team.name} already exists. Linking to league.")
+                    logger.info(f"Team {team.name} already exists. Linking to league.")
                     team = existing_team
                 session.add(team)
                 if league not in team.leagues:
                     team.leagues.append(league)
             session.commit()
+    logger.info("Teams loaded/updated.")
     return
 
 
@@ -180,20 +181,20 @@ def extract_players_from_soup(soup) -> list[Player]:
     players = []
     table = soup.find("table", class_="items")
     if not table:
-        logging.warning("No table with class 'items' found in the soup.")
+        logger.warning("No table with class 'items' found in the soup.")
         raise ValueError("No player rows found in the table.")
     tbody = table.find("tbody")
     if not tbody:
-        logging.warning("No tbody found in the players table.")
+        logger.warning("No tbody found in the players table.")
         raise ValueError("No player rows found in the table.")
     rows = tbody.find_all("tr", recursive=False)
     if not rows:
-        logging.warning("No rows found in the players table body.")
+        logger.warning("No rows found in the players table body.")
         raise ValueError("No player rows found in the table.")
     for row in rows:
         position_cell = row.find("td", class_=["zentriert", "rueckennummer"])
         if not position_cell or "title" not in position_cell.attrs:
-            logging.warning("Position cell missing or lacks title attribute.")
+            logger.warning("Position cell missing or lacks title attribute.")
             continue
         player_cell = row.find("td", class_="hauptlink")
         link_tag = player_cell.find("a")
@@ -222,19 +223,19 @@ def scrape_players_for_existing_teams(
         stmt = select(Team).order_by(col(Team.id)).offset(offset).limit(limit)
         teams = session.exec(stmt).all()
         for team in teams:
-            logging.info(f"Loading players for team: {team.name}")
+            logger.info(f"Loading players for team: {team.name}")
             soup = polite_get_soup(team.link)
             players = extract_players_from_soup(soup)
             for player in players:
-                logging.info(f" Adding/Updating player: {player.name}")
+                logger.info(f" Adding/Updating player: {player.name}")
                 existing_player = session.exec(
                     select(Player).where(Player.tm_id == player.tm_id)
                 ).first()
                 if existing_player and existing_player.team_id == team.id:
-                    logging.info(f"Player {player.name} already exists. Skipping.")
+                    logger.info(f"Player {player.name} already exists. Skipping.")
                     continue
                 elif existing_player and existing_player.team_id != team.id:
-                    logging.info(
+                    logger.info(
                         f"Player {player.name} already exists and is linked to another team. Updating team link."
                     )
                     player = existing_player
@@ -243,6 +244,7 @@ def scrape_players_for_existing_teams(
                 session.add(player)
             session.commit()
             del players
+    logger.info("Players loaded/updated.")
     return
 
 
@@ -270,11 +272,12 @@ def scrape_leagues() -> None:
     with Session(engine) as session:
         for name, link in DEFAULT_LEAGUES.items():
             if session.exec(select(League).where(League.name == name)).first():
-                logging.info(f"League {name} already exists. Skipping.")
+                logger.info(f"League {name} already exists. Skipping.")
                 continue
             league_id_match = re.search(r"/(?:pokal)?wettbewerb/(\w+)", link)
             league_id = league_id_match.group(1) if league_id_match else name
             league_db = League(tm_id=league_id, name=name, link=link)
             session.add(league_db)
         session.commit()
+    logger.info("Leagues loaded/updated.")    
     return
