@@ -113,25 +113,25 @@ def extract_teams_from_soup(soup: BeautifulSoup) -> list[Team]:
     table = soup.find("table", class_="items")
     if not table:
         raise ValueError("No teams found in the table.")
-    tbody = table.find("tbody")
+    tbody = table.find("tbody") # type: ignore
     if not tbody:
         raise ValueError("No teams found in the table.")
-    rows = tbody.find_all("tr", recursive=False)
+    rows = tbody.find_all("tr", recursive=False) # type: ignore 
     if not rows:
         raise ValueError("No teams found in the table.")
     for row in rows:
-        team_cell = row.find("td", class_=["hauptlink", "no-border-links"])
+        team_cell = row.find("td", class_=["hauptlink", "no-border-links"]) # type: ignore
         if not team_cell:
             raise ValueError("No teams found in the table.")
-        link_tag = team_cell.find("a")
-        if not link_tag or "href" not in link_tag.attrs:
+        link_tag = team_cell.find("a") # type: ignore
+        if not link_tag or "href" not in link_tag.attrs: # type: ignore
             raise ValueError("No valid team link found.")
-        team_name = link_tag.get_text(strip=True)
-        team_link = urljoin("https://www.transfermarkt.com", link_tag["href"])
-        team_id_match = re.search(r"/verein/(\w+)", link_tag["href"])
+        team_name = link_tag.get_text(strip=True) # type: ignore
+        team_link = urljoin("https://www.transfermarkt.com", link_tag["href"]) # type: ignore
+        team_id_match = re.search(r"/verein/(\w+)", link_tag["href"]) # type: ignore
         fubol_xd_name = PRETTIER_NAME.get(team_name, team_name)
         if not team_id_match:
-            raise ValueError(f"Could not extract team ID from link: {link_tag['href']}")
+            raise ValueError(f"Could not extract team ID from link: {link_tag['href']}") # type: ignore
         team_id = team_id_match.group(1)
         teams.append(
             Team(
@@ -149,7 +149,7 @@ def scrape_teams(avoid_leagues: list[int] | None = None) -> None:
         if avoid_leagues is None:
             stmt = select(League)
         else:
-            stmt = select(League).where(League.id.notin_(avoid_leagues))
+            stmt = select(League).where(League.id.notin_(avoid_leagues)) # type: ignore
         logger.info("Starting team load...")
         logger.info(
             f"Avoiding leagues: {avoid_leagues}",
@@ -279,5 +279,5 @@ def scrape_leagues() -> None:
             league_db = League(tm_id=league_id, name=name, link=link)
             session.add(league_db)
         session.commit()
-    logger.info("Leagues loaded/updated.")    
+    logger.info("Leagues loaded/updated.")
     return
