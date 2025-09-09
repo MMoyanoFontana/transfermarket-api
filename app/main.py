@@ -1,12 +1,14 @@
 import os
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import col, delete, select
+from sqlmodel import col, select
 
-from app.models import League, Player, SessionDep, Team, TeamLeagueLink
+from app.db import SessionDep
+from app.models import League, LeaguePublic, Team, TeamLeagueLink, TeamPublicWithPlayers
 from app.scraper import scrape_leagues, scrape_players_for_existing_teams, scrape_teams
 
 load_dotenv()
@@ -25,52 +27,35 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[FUBOLXD_URL, f"http://{MOYA_IP}"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
 
-@app.get("/")
-def read_root() -> dict:
-    return {"message": "Api funcionando"}
-
-
-@app.post("/leagues/")
-def update_leagues(background_tasks: BackgroundTasks) -> str:
-    background_tasks.add_task(scrape_leagues)
-    return "League update started in background"
-
-
-@app.get("/leagues/")
+@app.get(
+    "/leagues/",
+    response_model=list[LeaguePublic],
+    description="Obtiene la lista de todas las ligas.",
+)
 def read_leagues(session: SessionDep) -> list[League]:
     leagues = session.exec(select(League)).all()
     print(leagues)
     return list(leagues)
 
 
-@app.post("/leagues/teams/")
-def update_teams(
-    background_tasks: BackgroundTasks, avoid_leagues: list[int] = Query(default=None)
-) -> str:
-    background_tasks.add_task(scrape_teams, avoid_leagues=avoid_leagues)
-    return "Team update started"
-
-
-@app.delete("/leagues/{league_id}/")
-def delete_leagues(session: SessionDep, league_id: str) -> None:
-    stmt = delete(League).where(League.id == league_id)  # type: ignore
-    session.exec(stmt)  # type: ignore
-    session.commit()
-    return
-
-
-@app.get("/leagues/{league_id}/teams/")
-def read_league_teams(session: SessionDep, league_id: str) -> list[Team]:
+@app.get(
+    "/leagues/{league_id}/teams/",
+    response_model=list[TeamPublicWithPlayers],
+    description="Obtiene los equipos de una liga específica con sus jugadores.",
+)
+def read_league_teams(
+    session: SessionDep,
+    league_id: str,
+) -> list[Team]:
     stmt = (
         select(Team)
         .join(TeamLeagueLink, col(Team.id) == col(TeamLeagueLink.team_id))
@@ -80,29 +65,48 @@ def read_league_teams(session: SessionDep, league_id: str) -> list[Team]:
     return list(teams)
 
 
-@app.get("/teams/")
-def read_all_teams(session: SessionDep) -> dict[str, list[Team]]:
-    leagues = session.exec(select(League)).all()
-    return {league.name: league.teams for league in leagues}
+@app.get("/health/", description="Verifica el estado de salud de la API.")
+def read_health() -> dict:
+    return {"status": "ok"}
 
 
-@app.post("/teams/players/")
+subapp = FastAPI()
+
+subapp.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FUBOLXD_URL, f"http://{MOYA_IP}"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Internal use only
+@subapp.post("/leagues/")
+def update_leagues(background_tasks: BackgroundTasks) -> str:
+    background_tasks.add_task(scrape_leagues)
+    return "League update started in background"
+
+
+@subapp.post("/teams/")
+def update_teams(
+    background_tasks: BackgroundTasks,
+    avoid_leagues: list[int] = Query(default=None),
+) -> str:
+    background_tasks.add_task(scrape_teams, avoid_leagues=avoid_leagues)
+    return "Team update started"
+
+
+@subapp.post("/players/")
 def update_players(
-    background_tasks: BackgroundTasks, include_leagues: list[int] = Query(default=None)
+    background_tasks: BackgroundTasks,
+    offset: int = 0,  # team offset ie. from which team to start
+    limit: Annotated[int, Query(le=100)] = 100,  # how many teams to process in this run
 ) -> str:
     background_tasks.add_task(
-        scrape_players_for_existing_teams, include_leagues=include_leagues
+        scrape_players_for_existing_teams, offset=offset, limit=limit
     )
     return "Player update started"
 
 
-@app.get("/teams/{team_id}/players/")
-def read_players(session: SessionDep, team_id: str) -> list[Player]:
-    players = session.exec(select(Player).where(Player.team_id == team_id)).all()
-    print(players)
-    return list(players)
-
-
-@app.get("/health")
-def health_check() -> dict:
-    return {"status": "ok"}
+app.mount("/subapp", subapp)

@@ -1,9 +1,6 @@
-import os
-from typing import Annotated, Literal
+from typing import Literal
 
-from dotenv import load_dotenv
-from fastapi import Depends
-from sqlmodel import Field, Relationship, Session, SQLModel, String, create_engine
+from sqlmodel import Field, Relationship, SQLModel, String
 
 
 class TeamLeagueLink(SQLModel, table=True):
@@ -13,12 +10,17 @@ class TeamLeagueLink(SQLModel, table=True):
     )
 
 
-class Team(SQLModel, table=True):
+# https://sqlmodel.tiangolo.com/tutorial/fastapi/multiple-models/#multiple-models-with-inheritance
+class TeamBase(SQLModel):
+    fubolxd_name: str
+
+
+class Team(TeamBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    tm_id: str | None = Field(default=None, index=True)
-    fubolxd_id: str | None = Field(default=None, index=True)
-    name: str
+    fubolxd_id: str | None = None
+    name: str = Field(index=True)
     link: str
+    tm_id: str | None = None
     leagues: list["League"] = Relationship(
         back_populates="teams", link_model=TeamLeagueLink
     )
@@ -28,11 +30,18 @@ class Team(SQLModel, table=True):
         return f"Team(id={self.id!r}, name={self.name!r})"
 
 
-class League(SQLModel, table=True):
+class TeamPublic(TeamBase):
+    id: int
+
+
+class LeagueBase(SQLModel):
+    name: str = Field(index=True)
+
+
+class League(LeagueBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
     tm_id: str | None = None
     fubolxd_id: str | None = None
-    name: str
     link: str
     teams: list[Team] = Relationship(
         back_populates="leagues", link_model=TeamLeagueLink
@@ -42,34 +51,33 @@ class League(SQLModel, table=True):
         return f"League(name={self.name!r})"
 
 
-class Player(SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    tm_id: str | None = None
-    fubolxd_id: str | None = None
-    name: str
+class LeaguePublic(LeagueBase):
+    id: int
+
+
+class PlayerBase(SQLModel):
+    name: str = Field(index=True)
     position: Literal["Arquero", "Defensor", "Mediocampista", "Delantero"] | None = (
         Field(default=None, sa_type=String)
     )
-    link: str
+
+
+class Player(PlayerBase, table=True):
+    id: int | None = Field(default=None, primary_key=True)
     team_id: int | None = Field(default=None, foreign_key="team.id")
     team: Team | None = Relationship(back_populates="players")
+    tm_id: str | None = None
+    fubolxd_id: str | None = None
+    link: str
 
     def __repr__(self) -> str:
         return f"Player(name={self.name!r}, position={self.position!r}, team={self.team!r})"
 
 
-load_dotenv()
-db_url = os.getenv("DATABASE_URL")
-if not db_url:
-    raise ValueError("DATABASE_URL is not set in the environment variables")
-
-engine = create_engine(db_url)
-SQLModel.metadata.create_all(engine)
+class PlayerPublic(PlayerBase):
+    id: int
 
 
-def get_session():
-    with Session(engine) as session:
-        yield session
-
-
-SessionDep = Annotated[Session, Depends(get_session)]
+# Response models, to include relationships
+class TeamPublicWithPlayers(TeamPublic):
+    players: list[PlayerPublic] = []

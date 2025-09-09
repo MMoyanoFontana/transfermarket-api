@@ -8,7 +8,8 @@ import requests
 from bs4 import BeautifulSoup
 from sqlmodel import Session, col, select
 
-from app.models import League, Player, Team, TeamLeagueLink, engine
+from app.db import engine
+from app.models import League, Player, Team
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -35,8 +36,64 @@ HEADERS_BASE = {
 POSITION_TRANSLATE = {
     "Goalkeeper": "Arquero",
     "Defender": "Defensor",
-    "Midfielder": "Mediocampista",
-    "Forward": "Delantero",
+    "Midfield": "Mediocampista",
+    "Attack": "Delantero",
+}
+
+
+PRETTIER_NAME = {
+    "CA Boca Juniors": "Boca Juniors",
+    "CA River Plate": "River Plate",
+    "CA Independiente": "Independiente",
+    "CA Vélez Sarsfield": "Vélez Sarsfield",
+    "Club Estudiantes de La Plata": "Estudiantes de La Plata",
+    "CA Rosario Central": "Rosario Central",
+    "CA Talleres": "Talleres (C)",
+    "AA Argentinos Juniors": "Argentinos Juniors",
+    "Club Atlético Belgrano": "Belgrano (C)",
+    "CA San Lorenzo de Almagro": "San Lorenzo",
+    "CA Lanús": "Lanús",
+    "Club Atlético Tigre": "Tigre",
+    "CA Huracán": "Huracán",
+    "Club Atlético Platense": "Platense",
+    "Defensa y Justicia": "Defensa y Justicia",
+    "CD Godoy Cruz Antonio Tomba": "Godoy Cruz",
+    "Instituto ACC": "Instituto (C)",
+    "CS Independiente Rivadavia": "Independiente Rivadavia",
+    "CA Barracas Central": "Barracas Central",
+    "CA Unión (Santa Fe)": "Unión de Santa Fe",
+    "CA Newell's Old Boys": "Newell´s Old Boys",
+    "Club Atlético Tucumán": "Atlético Tucumán",
+    "CA Central Córdoba (SdE)": "Central Córdoba (SdE)",
+    "CA Banfield": "Banfield",
+    "Club de Gimnasia y Esgrima La Plata": "Gimnasia de La Plata",
+    "CA Sarmiento (Junin)": "Sarmiento de Junín",
+    "CA Aldosivi": "Aldosivi",
+    "CA San Martín (San Juan)": "San Martín (SJ)",
+    "Club Deportivo Riestra": "Deportivo Riestra",
+    "Sociedade Esportiva Palmeiras": "Palmeiras",
+    "CR Flamengo": "Flamengo",
+    "Botafogo de Futebol e Regatas": "Botafogo",
+    "Cruzeiro Esporte Clube": "Cruzeiro",
+    "Sport Club Corinthians Paulista": "Corinthians",
+    "Clube de Regatas Vasco da Gama": "Vasco da Gama",
+    "Esporte Clube Bahia": "Bahia",
+    "Clube Atlético Mineiro": "Atlético Mineiro",
+    "Fluminense Football Club": "Fluminense",
+    "São Paulo Futebol Clube": "São Paulo",
+    "Red Bull Bragantino": "RB Bragantino",
+    "Sport Club Internacional": "Internacional",
+    "Grêmio Foot-Ball Porto Alegrense": "Grêmio",
+    "Santos FC": "Santos",
+    "Fortaleza Esporte Clube": "Fortaleza",
+    "Sport Club do Recife": "Sport Recife",
+    "Esporte Clube Vitória": "Vitória",
+    "Ceará Sporting Club": "Ceará",
+    "Esporte Clube Juventude": "Juventude",
+    "Mirassol Futebol Clube (SP)": "Mirassol",
+    "Club Universidad de Chile": "Universidad de Chile",
+    "Club Alianza Lima": "Alianza Lima",
+    "Bolivar La Paz": "Bolívar",
 }
 
 
@@ -55,22 +112,35 @@ def extract_teams_from_soup(soup: BeautifulSoup) -> list[Team]:
     teams = []
     table = soup.find("table", class_="items")
     if not table:
-        logging.warning("No table with class 'items' found in the soup.")
-        return teams
+        raise ValueError("No teams found in the table.")
     tbody = table.find("tbody")
     if not tbody:
-        logging.warning("No tbody found in the teams table.")
-        return teams
+        raise ValueError("No teams found in the table.")
     rows = tbody.find_all("tr", recursive=False)
+    if not rows:
+        raise ValueError("No teams found in the table.")
     for row in rows:
-        team_cell = row.find("td", class_="hauptlink no-border-links")
+        team_cell = row.find("td", class_=["hauptlink", "no-border-links"])
+        if not team_cell:
+            raise ValueError("No teams found in the table.")
         link_tag = team_cell.find("a")
+        if not link_tag or "href" not in link_tag.attrs:
+            raise ValueError("No valid team link found.")
         team_name = link_tag.get_text(strip=True)
         team_link = urljoin("https://www.transfermarkt.com", link_tag["href"])
         team_id_match = re.search(r"/verein/(\w+)", link_tag["href"])
-        if team_id_match:
-            team_id = team_id_match.group(1)
-        teams.append(Team(tm_id=team_id or None, name=team_name, link=team_link))
+        fubol_xd_name = PRETTIER_NAME.get(team_name, team_name)
+        if not team_id_match:
+            raise ValueError(f"Could not extract team ID from link: {link_tag['href']}")
+        team_id = team_id_match.group(1)
+        teams.append(
+            Team(
+                tm_id=team_id or None,
+                name=team_name,
+                link=team_link,
+                fubolxd_name=fubol_xd_name,
+            )
+        )
     return teams
 
 
@@ -102,7 +172,7 @@ def scrape_teams(avoid_leagues: list[int] | None = None) -> None:
                 session.add(team)
                 if league not in team.leagues:
                     team.leagues.append(league)
-        session.commit()
+            session.commit()
     return
 
 
@@ -111,12 +181,15 @@ def extract_players_from_soup(soup) -> list[Player]:
     table = soup.find("table", class_="items")
     if not table:
         logging.warning("No table with class 'items' found in the soup.")
-        return players
+        raise ValueError("No player rows found in the table.")
     tbody = table.find("tbody")
     if not tbody:
         logging.warning("No tbody found in the players table.")
-        return players
+        raise ValueError("No player rows found in the table.")
     rows = tbody.find_all("tr", recursive=False)
+    if not rows:
+        logging.warning("No rows found in the players table body.")
+        raise ValueError("No player rows found in the table.")
     for row in rows:
         position_cell = row.find("td", class_=["zentriert", "rueckennummer"])
         if not position_cell or "title" not in position_cell.attrs:
@@ -142,17 +215,12 @@ def extract_players_from_soup(soup) -> list[Player]:
     return players
 
 
-def scrape_players_for_existing_teams(include_leagues: list[int] | None = None) -> None:
+def scrape_players_for_existing_teams(
+    offset: int | None = 0, limit: int | None = 1000
+) -> None:
     with Session(engine) as session:
-        if include_leagues is None:
-            teams = session.exec(select(Team)).all()
-        else:
-            stmt = (
-                select(Team)
-                .join(TeamLeagueLink, col(Team.id) == col(TeamLeagueLink.team_id))
-                .where(TeamLeagueLink.league_id.in_(include_leagues))
-            )
-            teams = session.exec(stmt).all()
+        stmt = select(Team).order_by(col(Team.id)).offset(offset).limit(limit)
+        teams = session.exec(stmt).all()
         for team in teams:
             logging.info(f"Loading players for team: {team.name}")
             soup = polite_get_soup(team.link)
@@ -173,7 +241,8 @@ def scrape_players_for_existing_teams(include_leagues: list[int] | None = None) 
                 player.team_id = team.id
                 player.team = team
                 session.add(player)
-        session.commit()
+            session.commit()
+            del players
     return
 
 
@@ -185,17 +254,27 @@ def scrape_leagues() -> None:
         "Serie A": "https://www.transfermarkt.com/serie-a/startseite/wettbewerb/IT1",
         "Bundesliga": "https://www.transfermarkt.com/bundesliga/startseite/wettbewerb/L1",
         "Ligue 1": "https://www.transfermarkt.com/ligue-1/startseite/wettbewerb/FR1",
+        # Otras Europa
+        "Eredivise": "https://www.transfermarkt.com/eredivisie/startseite/wettbewerb/NL1",
+        "Primeira Liga": "https://www.transfermarkt.com/liga-nos/startseite/wettbewerb/PO1",
         # Sudamérica
-        "Primera División Argentina": "https://www.transfermarkt.com/superliga/startseite/wettbewerb/AR1N",
+        "Liga Profesional Argentina": "https://www.transfermarkt.com/superliga/startseite/wettbewerb/ARGC",
         "Brasileirão Série A": "https://www.transfermarkt.com/campeonato-brasileiro-serie-a/startseite/wettbewerb/BRA1",
+        "Copa Argentina 2025": "https://www.transfermarkt.com/copa-argentina/teilnehmer/pokalwettbewerb/ARCA/saison_id/2024",
+        # Continentales
+        "UEFA Champions League": "https://www.transfermarkt.com/uefa-champions-league/teilnehmer/pokalwettbewerb/CL/saison_id/2025",
+        "UEFA Europa League": "https://www.transfermarkt.com/europa-league/teilnehmer/pokalwettbewerb/EL/saison_id/2025",
+        "Copa Libertadores 2025": "https://www.transfermarkt.com/copa-libertadores/teilnehmer/pokalwettbewerb/CLI/saison_id/2024",
+        "Copa Sudamericana 2025": "https://www.transfermarkt.com/copa-sudamericana/teilnehmer/pokalwettbewerb/CS/saison_id/2024",
     }
     with Session(engine) as session:
         for name, link in DEFAULT_LEAGUES.items():
             if session.exec(select(League).where(League.name == name)).first():
+                logging.info(f"League {name} already exists. Skipping.")
                 continue
             league_id_match = re.search(r"/(?:pokal)?wettbewerb/(\w+)", link)
             league_id = league_id_match.group(1) if league_id_match else name
             league_db = League(tm_id=league_id, name=name, link=link)
-            session.merge(league_db)
+            session.add(league_db)
         session.commit()
     return
