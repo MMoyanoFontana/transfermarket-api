@@ -14,11 +14,13 @@ from app.scraper import scrape_leagues, scrape_players_for_existing_teams, scrap
 load_dotenv()
 FUBOLXD_URL = os.getenv("FUBOLXD_URL")
 MOYA_IP = os.getenv("MOYA_IP")
+LUCHI_IP = os.getenv("LUCHI_IP")
 if not FUBOLXD_URL:
     raise ValueError("FUBOLXD_URL is not set in the environment variables")
 if not MOYA_IP:
     raise ValueError("MOYA_IP is not set in the environment variables")
-
+if not LUCHI_IP:
+    raise ValueError("LUCHI_IP is not set in the environment variables")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,7 +31,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FUBOLXD_URL, f"http://{MOYA_IP}"],
+    allow_origins=[FUBOLXD_URL, f"http://{MOYA_IP}", f"http://{LUCHI_IP}"],
     allow_credentials=True,
     allow_methods=["GET"],
     allow_headers=["*"],
@@ -40,6 +42,19 @@ app.add_middleware(
     "/leagues/",
     response_model=list[LeaguePublic],
     description="Obtiene la lista de todas las ligas.",
+    responses={
+        "200": {
+            "description": "Lista de ligas",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {"name": "Premier League", "id": 1},
+                        {"name": "LaLiga", "id": 2},
+                    ]
+                }
+            },
+        }
+    },
 )
 def read_leagues(session: SessionDep) -> list[League]:
     leagues = session.exec(select(League)).all()
@@ -51,6 +66,50 @@ def read_leagues(session: SessionDep) -> list[League]:
     "/leagues/{league_id}/teams/",
     response_model=list[TeamPublicWithPlayers],
     description="Obtiene los equipos de una liga específica con sus jugadores.",
+    responses={
+        "200": {
+            "description": "Equipos de liga league_id con sus jugadores",
+            "content": {
+                "application/json": {
+                    "example": [
+                        {
+                            "fubolxd_name": "Boca Juniors",
+                            "id": 97,
+                            "players": [
+                                {
+                                    "name": "Miguel Merentiel",
+                                    "position": "Delantero",
+                                    "id": 2671,
+                                },
+                                {
+                                    "name": "Leandro Paredes",
+                                    "position": "Mediocampista",
+                                    "id": 2656,
+                                },
+                            ],
+                        },
+                        {
+                            "fubolxd_name": "Talleres (C)",
+                            "id": 104,
+                            "players": [
+                                {
+                                    "name": "Guido Herrera",
+                                    "position": "Arquero",
+                                    "id": 2850,
+                                },
+                                {
+                                    "name": "Emanuel Reynoso",
+                                    "position": "Mediocampista",
+                                    "id": 2866,
+                                },
+                            ],
+                        },
+                    ]
+                }
+            },
+        },
+        "404": {"description": "Liga no encontrada"},
+    },
 )
 def read_league_teams(
     session: SessionDep,
@@ -63,7 +122,7 @@ def read_league_teams(
     )
     teams = session.exec(stmt).all()
     if not teams:
-        raise HTTPException(status_code=404, detail="League not found")
+        raise HTTPException(status_code=404)
     return list(teams)
 
 
@@ -76,7 +135,7 @@ subapp = FastAPI()
 
 subapp.add_middleware(
     CORSMiddleware,
-    allow_origins=[FUBOLXD_URL, f"http://{MOYA_IP}"],
+    allow_origins=[f"http://{MOYA_IP}"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
