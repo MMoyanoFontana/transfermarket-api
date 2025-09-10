@@ -14,13 +14,10 @@ from app.scraper import scrape_leagues, scrape_players_for_existing_teams, scrap
 load_dotenv()
 FUBOLXD_URL = os.getenv("FUBOLXD_URL")
 MOYA_IP = os.getenv("MOYA_IP")
-LUCHI_IP = os.getenv("LUCHI_IP")
 if not FUBOLXD_URL:
     raise ValueError("FUBOLXD_URL is not set in the environment variables")
 if not MOYA_IP:
     raise ValueError("MOYA_IP is not set in the environment variables")
-if not LUCHI_IP:
-    raise ValueError("LUCHI_IP is not set in the environment variables")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,7 +28,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FUBOLXD_URL, f"http://{MOYA_IP}", f"http://{LUCHI_IP}"],
+    allow_origins=[FUBOLXD_URL, f"http://{MOYA_IP}"],
     allow_credentials=True,
     allow_methods=["GET"],
     allow_headers=["*"],
