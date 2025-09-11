@@ -4,6 +4,8 @@ from sqlmodel import Field, Relationship, SQLModel, String
 
 
 class TeamLeagueLink(SQLModel, table=True):
+    __tablename__: str = "team_league_link"
+
     team_id: int | None = Field(default=None, foreign_key="team.id", primary_key=True)
     league_id: int | None = Field(
         default=None, foreign_key="league.id", primary_key=True
@@ -21,10 +23,19 @@ class Team(TeamBase, table=True):
     name: str = Field(index=True)
     link: str
     tm_id: str | None = None
+    team_type: Literal["Club", "Seleccion"] = Field(default="Club", sa_type=String)
     leagues: list["League"] = Relationship(
         back_populates="teams", link_model=TeamLeagueLink
     )
-    players: list["Player"] = Relationship(back_populates="team")
+    # Disambiguated relationships
+    players: list["Player"] = Relationship(
+        back_populates="team",
+        sa_relationship_kwargs={"foreign_keys": "Player.team_id"}
+    )
+    national_players: list["Player"] = Relationship(
+        back_populates="national_team",
+        sa_relationship_kwargs={"foreign_keys": "Player.national_team_id"}
+    )
 
     def __repr__(self) -> str:
         return f"Team(id={self.id!r}, name={self.name!r})"
@@ -40,6 +51,9 @@ class LeagueBase(SQLModel):
 
 class League(LeagueBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    league_type: Literal["Clubes", "Selecciones"] = Field(
+        default="Clubes", sa_type=String
+    )
     tm_id: str | None = None
     fubolxd_id: str | None = None
     link: str
@@ -64,8 +78,16 @@ class PlayerBase(SQLModel):
 
 class Player(PlayerBase, table=True):
     id: int | None = Field(default=None, primary_key=True)
+    team: Team | None = Relationship(
+        back_populates="players",
+        sa_relationship_kwargs={"foreign_keys": "Player.team_id"},
+    )
     team_id: int | None = Field(default=None, foreign_key="team.id")
-    team: Team | None = Relationship(back_populates="players")
+    national_team: Team | None = Relationship(
+        back_populates="national_players",
+        sa_relationship_kwargs={"foreign_keys": "Player.national_team_id"},
+    )
+    national_team_id: int | None = Field(default=None, foreign_key="team.id")
     tm_id: str | None = None
     fubolxd_id: str | None = None
     link: str

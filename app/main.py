@@ -1,14 +1,21 @@
 import os
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import col, select
+from sqlmodel import col, func, select
 
 from app.db import SessionDep, _create_all_safe, wait_for_db
-from app.models import League, LeaguePublic, Team, TeamLeagueLink, TeamPublicWithPlayers
+from app.models import (
+    League,
+    LeaguePublic,
+    Player,
+    Team,
+    TeamLeagueLink,
+    TeamPublicWithPlayers,
+)
 from app.scraper import scrape_leagues, scrape_players_for_existing_teams, scrape_teams
 
 load_dotenv()
@@ -22,10 +29,10 @@ if not MOYA_IP:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    ok = await wait_for_db()
+    ok = wait_for_db()
     if ok:
         try:
-            await _create_all_safe()
+            _create_all_safe()
         except Exception as e:
             print(f"[lifespan] create_all falló: {e}")
     else:
@@ -62,9 +69,18 @@ app.add_middleware(
         }
     },
 )
-def read_leagues(session: SessionDep) -> list[League]:
-    leagues = session.exec(select(League)).all()
-    print(leagues)
+def read_leagues(
+    session: SessionDep,
+    include: Literal["Clubes", "Selecciones", "Todas"] = Query(
+        default="Todas", description="Filtra ligas por tipo"
+    ),
+) -> list[League]:
+    condition = {
+        "Clubes": League.league_type == "Clubes",
+        "Selecciones": League.league_type == "Selecciones",
+        "Todas": True,
+    }
+    leagues = session.exec(select(League).where(condition[include])).all()
     return list(leagues)
 
 
@@ -119,7 +135,7 @@ def read_leagues(session: SessionDep) -> list[League]:
 )
 def read_league_teams(
     session: SessionDep,
-    league_id: str,
+    league_id: int,
 ) -> list[Team]:
     stmt = (
         select(Team)
@@ -159,9 +175,30 @@ def update_leagues(background_tasks: BackgroundTasks) -> str:
 def update_teams(
     background_tasks: BackgroundTasks,
     avoid_leagues: list[int] = Query(default=None),
+    include: Literal["Clubes", "Selecciones", "Todas"] = Query(
+        default="Todas", description="Filtra ligas por tipo"
+    ),
 ) -> str:
-    background_tasks.add_task(scrape_teams, avoid_leagues=avoid_leagues)
+    background_tasks.add_task(
+        scrape_teams, avoid_leagues=avoid_leagues, include=include
+    )
     return "Team update started"
+
+
+@subapp.get("/teams/count/")
+def team_count(
+    session: SessionDep,
+) -> dict[str, int]:
+    count = session.exec(select(func.count()).select_from(Team)).one()
+    return {"Team count": count}
+
+
+@subapp.get("/players/count/")
+def player_count(
+    session: SessionDep,
+) -> dict[str, int]:
+    count = session.exec(select(func.count()).select_from(Player)).one()
+    return {"Player count": count}
 
 
 @subapp.post("/players/")

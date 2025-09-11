@@ -1,13 +1,11 @@
-import asyncio
 import logging
 import os
 import urllib.parse
+import time
 from typing import Annotated
 
-import anyio
 from dotenv import load_dotenv
 from fastapi import Depends
-from pyodbc import OperationalError
 from sqlalchemy import NullPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -23,6 +21,7 @@ if not DATABASE_SERVER or not DATABASE_DB or not DATABASE_USER or not DATABASE_P
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
 
 def make_engine():
     odbc = urllib.parse.quote_plus(
@@ -41,7 +40,7 @@ def make_engine():
     # mssql+pyodbc con pool sano
     engine = create_engine(
         f"mssql+pyodbc:///?odbc_connect={odbc}",
-        poolclass=NullPool,  # ← clave: no guarda conexiones que puedan “caducar”
+        poolclass=NullPool,
         future=True,
     )
     return engine
@@ -56,32 +55,30 @@ def _check_db_once() -> None:
         conn.exec_driver_sql("SELECT 1")
 
 
-async def wait_for_db(max_attempts: int = 8, base_delay: float = 1.5) -> bool:
+def wait_for_db(max_attempts: int = 8, base_delay: float = 1.5) -> bool:
     """
     Reintenta con backoff exponencial (1.5s, 3s, 6s, ... máx 30s)
     hasta que la DB responda. No bloquea el event loop.
     """
     for i in range(max_attempts):
         try:
-            await anyio.to_thread.run_sync(_check_db_once)
+            _check_db_once()
             logger.info("DB disponible")
             return True
-        except OperationalError as e:
+        except Exception as e:
             msg = str(e).lower()
-            logger.warning(f"DB no disponible, reintentando... ({i+1}/{max_attempts}) {msg}")
-            if "hyt00" in msg or "timeout" in msg or "08s01" in msg:
-                delay = min(30.0, base_delay * (2**i))
-                await asyncio.sleep(delay)
-                continue
-            # Errores reales (credenciales/host) -> no insistir
-            raise
+            logger.warning(
+                f"DB no disponible, reintentando... ({i + 1}/{max_attempts}) {msg}"
+            )
+            delay = min(30.0, base_delay * (2**i))
+            time.sleep(delay)
     return False
 
 
-async def _create_all_safe():
+def _create_all_safe():
     """Ejecuta create_all en thread, para no bloquear el loop."""
     logger.info("Creando metada")
-    await anyio.to_thread.run_sync(lambda: SQLModel.metadata.create_all(engine))
+    SQLModel.metadata.create_all(engine)
 
 
 def get_session():

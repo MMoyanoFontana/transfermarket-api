@@ -2,6 +2,7 @@ import logging
 import random
 import re
 import time
+from typing import Literal, cast
 from urllib.parse import urljoin
 
 import requests
@@ -144,18 +145,29 @@ def extract_teams_from_soup(soup: BeautifulSoup) -> list[Team]:
     return teams
 
 
-def scrape_teams(avoid_leagues: list[int] | None = None) -> None:
+def scrape_teams(
+    include: Literal["Clubes", "Selecciones", "Todas"],
+    avoid_leagues: list[int] | None = None,
+) -> None:
     with Session(engine) as session:
+        condition = {
+            "Clubes": League.league_type == "Clubes",
+            "Selecciones": League.league_type == "Selecciones",
+            "Todas": True,
+        }
         if avoid_leagues is None:
             stmt = select(League)
         else:
             stmt = select(League).where(League.id.notin_(avoid_leagues))  # type: ignore
+        stmt = stmt.where(condition[include])
         logger.info("Starting team load...")
         logger.info(
             f"Avoiding leagues: {avoid_leagues}",
+            f"Including type: {include}",
         )
         leagues = session.exec(stmt).all()
         for league in leagues:
+            league_type = league.league_type
             logger.info(f"Loading {league.name} teams:")
             soup = polite_get_soup(league.link)
             teams = extract_teams_from_soup(soup)
@@ -169,6 +181,7 @@ def scrape_teams(avoid_leagues: list[int] | None = None) -> None:
                 if existing_team:
                     logger.info(f"Team {team.name} already exists. Linking to league.")
                     team = existing_team
+                team.team_type = "Club" if league_type == "Clubes" else "Seleccion"
                 session.add(team)
                 if league not in team.leagues:
                     team.leagues.append(league)
@@ -231,16 +244,44 @@ def scrape_players_for_existing_teams(
                 existing_player = session.exec(
                     select(Player).where(Player.tm_id == player.tm_id)
                 ).first()
-                if existing_player and existing_player.team_id == team.id:
-                    logger.info(f"Player {player.name} already exists. Skipping.")
+                if (
+                    existing_player
+                    and team.team_type == "Club"
+                    and existing_player.team_id == team.id
+                ):
+                    logger.info(f"Player {player.name} already exists in Team. Skipping.")
                     continue
-                elif existing_player and existing_player.team_id != team.id:
+                elif (
+                    existing_player
+                    and team.team_type == "Club"
+                    and existing_player.team_id != team.id
+                ):
                     logger.info(
                         f"Player {player.name} already exists and is linked to another team. Updating team link."
                     )
                     player = existing_player
-                player.team_id = team.id
-                player.team = team
+                elif (
+                    existing_player
+                    and team.team_type == "Seleccion"
+                    and existing_player.national_team_id == team.id
+                ):
+                    logger.info(f"Player {player.name} already exists in national team. Skipping.")
+                    continue
+                elif (
+                    existing_player
+                    and team.team_type == "Seleccion"
+                    and existing_player.national_team_id != team.id
+                ):
+                    logger.info(
+                        f"Player {player.name} already exists and is linked to another national team. Updating team link."
+                    )
+                    player = existing_player
+                if team.team_type == "Seleccion":
+                    player.national_team_id = team.id
+                    player.national_team = team
+                else:
+                    player.team_id = team.id
+                    player.team = team
                 session.add(player)
             session.commit()
             del players
@@ -249,34 +290,92 @@ def scrape_players_for_existing_teams(
 
 
 def scrape_leagues() -> None:
-    DEFAULT_LEAGUES = {
+    DEFAULT_LEAGUES: dict[str, dict[str, str | Literal["Clubes", "Selecciones"]]] = {
         # Top 5 Europe
-        "Premier League": "https://www.transfermarkt.com/premier-league/startseite/wettbewerb/GB1",
-        "LaLiga": "https://www.transfermarkt.com/laliga/startseite/wettbewerb/ES1",
-        "Serie A": "https://www.transfermarkt.com/serie-a/startseite/wettbewerb/IT1",
-        "Bundesliga": "https://www.transfermarkt.com/bundesliga/startseite/wettbewerb/L1",
-        "Ligue 1": "https://www.transfermarkt.com/ligue-1/startseite/wettbewerb/FR1",
+        "Premier League": {
+            "link": "https://www.transfermarkt.com/premier-league/startseite/wettbewerb/GB1",
+            "type": "Clubes",
+        },
+        "LaLiga": {
+            "link": "https://www.transfermarkt.com/laliga/startseite/wettbewerb/ES1",
+            "type": "Clubes",
+        },
+        "Serie A": {
+            "link": "https://www.transfermarkt.com/serie-a/startseite/wettbewerb/IT1",
+            "type": "Clubes",
+        },
+        "Bundesliga": {
+            "link": "https://www.transfermarkt.com/bundesliga/startseite/wettbewerb/L1",
+            "type": "Clubes",
+        },
+        "Ligue 1": {
+            "link": "https://www.transfermarkt.com/ligue-1/startseite/wettbewerb/FR1",
+            "type": "Clubes",
+        },
         # Otras Europa
-        "Eredivise": "https://www.transfermarkt.com/eredivisie/startseite/wettbewerb/NL1",
-        "Primeira Liga": "https://www.transfermarkt.com/liga-nos/startseite/wettbewerb/PO1",
+        "Eredivise": {
+            "link": "https://www.transfermarkt.com/eredivisie/startseite/wettbewerb/NL1",
+            "type": "Clubes",
+        },
+        "Primeira Liga": {
+            "link": "https://www.transfermarkt.com/liga-nos/startseite/wettbewerb/PO1",
+            "type": "Clubes",
+        },
         # Sudamérica
-        "Liga Profesional Argentina": "https://www.transfermarkt.com/superliga/startseite/wettbewerb/ARGC",
-        "Brasileirão Série A": "https://www.transfermarkt.com/campeonato-brasileiro-serie-a/startseite/wettbewerb/BRA1",
-        "Copa Argentina 2025": "https://www.transfermarkt.com/copa-argentina/teilnehmer/pokalwettbewerb/ARCA/saison_id/2024",
+        "Liga Profesional Argentina": {
+            "link": "https://www.transfermarkt.com/superliga/startseite/wettbewerb/ARGC",
+            "type": "Clubes",
+        },
+        "Brasileirão Série A": {
+            "link": "https://www.transfermarkt.com/campeonato-brasileiro-serie-a/startseite/wettbewerb/BRA1",
+            "type": "Clubes",
+        },
+        "Copa Argentina 2025": {
+            "link": "https://www.transfermarkt.com/copa-argentina/teilnehmer/pokalwettbewerb/ARCA/saison_id/2024",
+            "type": "Clubes",
+        },
         # Continentales
-        "UEFA Champions League": "https://www.transfermarkt.com/uefa-champions-league/teilnehmer/pokalwettbewerb/CL/saison_id/2025",
-        "UEFA Europa League": "https://www.transfermarkt.com/europa-league/teilnehmer/pokalwettbewerb/EL/saison_id/2025",
-        "Copa Libertadores 2025": "https://www.transfermarkt.com/copa-libertadores/teilnehmer/pokalwettbewerb/CLI/saison_id/2024",
-        "Copa Sudamericana 2025": "https://www.transfermarkt.com/copa-sudamericana/teilnehmer/pokalwettbewerb/CS/saison_id/2024",
+        "UEFA Champions League": {
+            "link": "https://www.transfermarkt.com/uefa-champions-league/teilnehmer/pokalwettbewerb/CL/saison_id/2025",
+            "type": "Clubes",
+        },
+        "UEFA Europa League": {
+            "link": "https://www.transfermarkt.com/europa-league/teilnehmer/pokalwettbewerb/EL/saison_id/2025",
+            "type": "Clubes",
+        },
+        "Copa Libertadores 2025": {
+            "link": "https://www.transfermarkt.com/copa-libertadores/teilnehmer/pokalwettbewerb/CLI/saison_id/2024",
+            "type": "Clubes",
+        },
+        "Copa Sudamericana 2025": {
+            "link": "https://www.transfermarkt.com/copa-sudamericana/teilnehmer/pokalwettbewerb/CS/saison_id/2024",
+            "type": "Clubes",
+        },
+        # Nacionales
+        "Eliminatorias Sudamericanas": {
+            "link": "https://www.transfermarkt.com.ar/wm-qualifikation-sudamerika/teilnehmer/pokalwettbewerb/WMQ4/saison_id/2023",
+            "type": "Selecciones",
+        },
+        "Eliminatorias UEFA": {
+            "link": "https://www.transfermarkt.com.ar/wm-qualifikation-europa/teilnehmer/pokalwettbewerb/WMQ6/saison_id/2024",
+            "type": "Selecciones",
+        },
     }
     with Session(engine) as session:
-        for name, link in DEFAULT_LEAGUES.items():
+        for name, details in DEFAULT_LEAGUES.items():
+            link = details["link"]
+            league_type = cast(Literal["Clubes", "Selecciones"], details["type"])
             if session.exec(select(League).where(League.name == name)).first():
                 logger.info(f"League {name} already exists. Skipping.")
                 continue
             league_id_match = re.search(r"/(?:pokal)?wettbewerb/(\w+)", link)
             league_id = league_id_match.group(1) if league_id_match else name
-            league_db = League(tm_id=league_id, name=name, link=link)
+            league_db = League(
+                tm_id=league_id,
+                name=name,
+                league_type=league_type,
+                link=details["link"],
+            )
             session.add(league_db)
         session.commit()
     logger.info("Leagues loaded/updated.")
