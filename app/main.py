@@ -7,7 +7,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import col, select
 
-from app.db import SessionDep
+from app.db import SessionDep, _create_all_safe, wait_for_db
 from app.models import League, LeaguePublic, Team, TeamLeagueLink, TeamPublicWithPlayers
 from app.scraper import scrape_leagues, scrape_players_for_existing_teams, scrape_teams
 
@@ -19,8 +19,17 @@ if not FUBOLXD_URL:
 if not MOYA_IP:
     raise ValueError("MOYA_IP is not set in the environment variables")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    ok = await wait_for_db()
+    if ok:
+        try:
+            await _create_all_safe()
+        except Exception as e:
+            print(f"[lifespan] create_all falló: {e}")
+    else:
+        print("[lifespan] DB no respondió a tiempo; la app arranca igual.")
     yield
 
 
