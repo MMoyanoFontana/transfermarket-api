@@ -143,6 +143,7 @@ def read_league_teams(
         .where(TeamLeagueLink.league_id == league_id)
     )
     teams = session.exec(stmt).all()
+    print(teams)
     if not teams:
         raise HTTPException(status_code=404)
     return list(teams)

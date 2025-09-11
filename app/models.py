@@ -29,12 +29,10 @@ class Team(TeamBase, table=True):
     )
     # Disambiguated relationships
     players: list["Player"] = Relationship(
-        back_populates="team",
-        sa_relationship_kwargs={"foreign_keys": "Player.team_id"}
-    )
-    national_players: list["Player"] = Relationship(
-        back_populates="national_team",
-        sa_relationship_kwargs={"foreign_keys": "Player.national_team_id"}
+        sa_relationship_kwargs={
+            "primaryjoin": "or_(Team.id==Player.team_id, Team.id==Player.national_team_id)",
+            "foreign_keys": "[Player.team_id, Player.national_team_id]"
+        },
     )
 
     def __repr__(self) -> str:
@@ -84,7 +82,7 @@ class Player(PlayerBase, table=True):
     )
     team_id: int | None = Field(default=None, foreign_key="team.id")
     national_team: Team | None = Relationship(
-        back_populates="national_players",
+        back_populates="players",
         sa_relationship_kwargs={"foreign_keys": "Player.national_team_id"},
     )
     national_team_id: int | None = Field(default=None, foreign_key="team.id")
